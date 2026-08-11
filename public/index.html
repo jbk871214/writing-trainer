@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>每日写作训练</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#fafafa">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fafafa; color: #333; }
+    .app { max-width: 600px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+    .page { flex: 1; padding: 16px; display: none; }
+    .page.active { display: block; }
+    .tab-bar { display: flex; border-top: 1px solid #eee; background: #fff; }
+    .tab { flex: 1; text-align: center; padding: 12px 0; cursor: pointer; font-size: 14px; color: #999; }
+    .tab.active { color: #333; font-weight: bold; }
+    button { background: #333; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    button:active { opacity: 0.8; }
+    .topic-card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .topic-card .title { font-size: 16px; margin-bottom: 8px; }
+    .topic-card button { margin-top: 8px; width: 100%; }
+    textarea { width: 100%; height: 60vh; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; line-height: 1.6; resize: none; }
+    .word-count { text-align: right; color: #999; font-size: 12px; margin-top: 4px; }
+    .article-list-item { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+    .article-list-item .date { font-size: 12px; color: #999; }
+    .review-box { background: #f0f8ff; border-radius: 8px; padding: 12px; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div id="page-daily" class="page active">
+      <h2 style="margin-bottom:12px">今日写作</h2>
+      <div id="daily-date"></div>
+      <div id="daily-topics-area"></div>
+      <div id="daily-editor" style="display:none">
+        <div id="selected-topic" style="font-weight:bold;margin-bottom:8px"></div>
+        <textarea id="writing-area" placeholder="开始写..."></textarea>
+        <div class="word-count" id="word-count">共 0 字</div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button id="save-draft-btn" style="flex:1;background:#666">保存草稿</button>
+          <button id="submit-btn" style="flex:1">完成并提交</button>
+        </div>
+      </div>
+      <div id="review-area" style="display:none">
+        <div class="review-box" id="review-text"></div>
+        <button id="copy-review-article">复制全文</button>
+        <button id="back-from-review" style="background:#999;margin-left:8px">返回</button>
+      </div>
+    </div>
+    <div id="page-small" class="page">
+      <h2 style="margin-bottom:12px">试试这些小事</h2>
+      <div id="small-topic-card" class="topic-card">
+        <div class="title" id="small-topic-text"></div>
+        <button id="small-start-btn">开始写</button>
+        <button id="small-refresh-btn" style="background:#999;margin-top:8px">换一个</button>
+      </div>
+    </div>
+    <div id="page-articles" class="page">
+      <h2 style="margin-bottom:12px">我的文章</h2>
+      <div id="articles-list"></div>
+    </div>
+    <div class="tab-bar">
+      <div class="tab active" data-page="daily">今日写作</div>
+      <div class="tab" data-page="small">随便写点</div>
+      <div class="tab" data-page="articles">我的文章</div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- 工具函数 ----------
+    const $ = (s) => document.querySelector(s);
+    const getDeviceId = () => {
+      let id = localStorage.getItem('device_id');
+      if (!id) { id = crypto.randomUUID(); localStorage.setItem('device_id', id); }
+      return id;
+    };
+    const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const todayStr = formatDate(new Date());
+
+    // ---------- IndexedDB 封装 ----------
+    const dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open('writing-trainer', 1);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('articles')) {
+          db.createObjectStore('articles', { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      request.onsuccess = (e) => resolve(e.target.result);
+      request.onerror = (e) => reject(e.target.error);
+    });
+    const saveArticle = async (article) => {
+      const db = await dbPromise;
+      const tx = db.transaction('articles', 'readwrite');
+      tx.objectStore('articles').add(article);
+      return tx.complete;
+    };
+    const getAllArticles = async () => {
+      const db = await dbPromise;
+      const tx = db.transaction('articles', 'readonly');
+      return new Promise((resolve) => {
+        const request = tx.objectStore('articles').getAll();
+        request.onsuccess = () => resolve(request.result.reverse());
+      });
+    };
+
+    // ---------- 页面切换 ----------
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        $(`#page-${tab.dataset.page}`).classList.add('active');
+        if (tab.dataset.page === 'articles') loadArticles();
+      });
+    });
+
+    // ---------- 每日话题 ----------
+    let currentTopics = [];
+    async function loadDailyTopics() {
+      const cached = JSON.parse(localStorage.getItem('dailyTopicsCache') || '{}');
+      if (cached.date === todayStr && cached.topics?.length) {
+        renderTopics(cached.topics);
+        return;
+      }
+      try {
+        // 获取RSS
+        const rssRes = await fetch('/api/rss-news');
+        const { rssContent } = await rssRes.json();
+        const seed = parseInt(getDeviceId().replace(/-/g,'').slice(0,8), 16) + new Date(todayStr).getTime();
+        const res = await fetch('/api/generate-topics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'daily', seed, rssContent })
+        });
+        const data = await res.json();
+        if (data.topics?.length) {
+          localStorage.setItem('dailyTopicsCache', JSON.stringify({ date: todayStr, topics: data.topics }));
+          renderTopics(data.topics);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    function renderTopics(topics) {
+      currentTopics = topics;
+      const area = $('#daily-topics-area');
+      area.innerHTML = '';
+      topics.forEach((t, i) => {
+        const card = document.createElement('div');
+        card.className = 'topic-card';
+        card.innerHTML = `<div class="title">${t}</div><button class="select-topic-btn">选这个写</button>`;
+        card.querySelector('.select-topic-btn').addEventListener('click', () => startWriting(t));
+        area.appendChild(card);
+      });
+      const refreshBtn = document.createElement('button');
+      refreshBtn.textContent = '不喜欢？重新生成';
+      refreshBtn.style.background = '#999';
+      refreshBtn.style.marginTop = '8px';
+      refreshBtn.addEventListener('click', async () => {
+        localStorage.removeItem('dailyTopicsCache');
+        await loadDailyTopics();
+      });
+      area.appendChild(refreshBtn);
+    }
+
+    // ---------- 写作编辑器 ----------
+    function startWriting(topic) {
+      $('#daily-topics-area').style.display = 'none';
+      $('#daily-editor').style.display = 'block';
+      $('#selected-topic').textContent = topic;
+      $('#writing-area').value = '';
+      updateWordCount();
+      // 编辑器缩进逻辑
+      const textarea = $('#writing-area');
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const val = textarea.value;
+          textarea.value = val.substring(0, start) + '\n\u3000\u3000' + val.substring(end);
+          textarea.selectionStart = textarea.selectionEnd = start + 3;
+          updateWordCount();
+        }
+      });
+      textarea.addEventListener('input', updateWordCount);
+      // 草稿恢复
+      const draftKey = `draft_${topic}_${todayStr}`;
+      const draft = localStorage.getItem(draftKey);
+      if (draft) textarea.value = draft;
+    }
+    function updateWordCount() {
+      const len = $('#writing-area').value.length;
+      $('#word-count').textContent = `共 ${len} 字`;
+    }
+    $('#save-draft-btn').addEventListener('click', () => {
+      const topic = $('#selected-topic').textContent;
+      const draftKey = `draft_${topic}_${todayStr}`;
+      localStorage.setItem(draftKey, $('#writing-area').value);
+      alert('草稿已保存');
+    });
+    $('#submit-btn').addEventListener('click', async () => {
+      const topic = $('#selected-topic').textContent;
+      let content = $('#writing-area').value;
+      // 统一段落缩进
+      content = content.split('\n').map(line => line.trim() ? '\u3000\u3000' + line : line).join('\n');
+      $('#writing-area').value = content;
+      // 提交评分
+      try {
+        const res = await fetch('/api/rate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ article: content, topic })
+        });
+        const data = await res.json();
+        // 存文章
+        await saveArticle({ date: todayStr, topic, content, review: data.review || '', timestamp: Date.now() });
+        // 清除草稿
+        const draftKey = `draft_${topic}_${todayStr}`;
+        localStorage.removeItem(draftKey);
+        // 显示评语
+        $('#daily-editor').style.display = 'none';
+        $('#review-area').style.display = 'block';
+        $('#review-text').textContent = data.review || '感谢你的分享，继续加油！';
+      } catch (e) {
+        alert('提交失败，请检查网络');
+      }
+    });
+    $('#copy-review-article').addEventListener('click', () => {
+      navigator.clipboard.writeText($('#writing-area').value);
+      alert('已复制全文');
+    });
+    $('#back-from-review').addEventListener('click', () => {
+      $('#review-area').style.display = 'none';
+      $('#daily-topics-area').style.display = 'block';
+    });
+
+    // ---------- 随便写点 ----------
+    let smallTopicCache = [];
+    async function loadSmallTopic() {
+      if (smallTopicCache.length === 0) {
+        try {
+          const res = await fetch('/api/generate-topics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'small-things', seed: Math.floor(Math.random()*10000) })
+          });
+          const data = await res.json();
+          if (data.topics?.length) smallTopicCache = data.topics;
+        } catch (e) {}
+      }
+      if (smallTopicCache.length > 0) {
+        const randomIndex = Math.floor(Math.random() * smallTopicCache.length);
+        $('#small-topic-text').textContent = smallTopicCache[randomIndex];
+      } else {
+        $('#small-topic-text').textContent = '写下今天最安静的时刻';
+      }
+    }
+    $('#small-refresh-btn').addEventListener('click', loadSmallTopic);
+    $('#small-start-btn').addEventListener('click', () => {
+      const topic = $('#small-topic-text').textContent;
+      // 复用编辑器，但跳转到每日页并启动
+      document.querySelector('.tab[data-page="daily"]').click();
+      startWriting(topic);
+    });
+
+    // ---------- 我的文章 ----------
+    async function loadArticles() {
+      const articles = await getAllArticles();
+      const list = $('#articles-list');
+      list.innerHTML = '';
+      articles.forEach(a => {
+        const div = document.createElement('div');
+        div.className = 'article-list-item';
+        div.innerHTML = `<div class="date">${a.date}</div><div><b>${a.topic || '无题'}</b></div><div style="color:#666">${a.content.slice(0,50)}...</div>`;
+        div.addEventListener('click', () => {
+          alert(`题目：${a.topic}\n\n${a.content}\n\n${a.review ? '评语：'+a.review : ''}`);
+          if (confirm('复制全文？')) navigator.clipboard.writeText(a.content);
+        });
+        list.appendChild(div);
+      });
+    }
+
+    // 初始化
+    $('#daily-date').textContent = `${todayStr} 星期${['日','一','二','三','四','五','六'][new Date().getDay()]}`;
+    loadDailyTopics();
+    loadSmallTopic();
+  </script>
+</body>
+</html>
