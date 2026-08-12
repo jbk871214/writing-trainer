@@ -49,7 +49,7 @@ export async function onRequest(context) {
         'Authorization': `Bearer ${env.SILICONFLOW_KEY}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-ai/DeepSeek-V2.5',
+        model: 'Qwen/Qwen3.6-35B-A3B',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
