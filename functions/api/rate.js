@@ -1,5 +1,5 @@
 const SILICONFLOW_API = 'https://api.siliconflow.cn/v1/chat/completions';
-const MODEL = 'deepseek-ai/DeepSeek-V2.5';
+const MODEL = 'Qwen/Qwen3.6-35B-A3B';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
