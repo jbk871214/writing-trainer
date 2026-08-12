@@ -131,8 +131,10 @@
         });
         const data = await res.json();
         if (data.topics?.length) {
-          localStorage.setItem('dailyTopicsCache', JSON.stringify({ date: todayStr, topics: data.topics }));
-          renderTopics(data.topics);
+            console.log('拿到题目:', data.topics);
+            alert('拿到题目: ' + data.topics.join(', '));
+            localStorage.setItem('dailyTopicsCache', JSON.stringify({ date: todayStr, topics: data.topics }));
+            renderTopics(data.topics);
         } else {
           throw new Error('no topics');
         }
