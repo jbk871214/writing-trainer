@@ -68,7 +68,6 @@
   </div>
 
   <script>
-    // ---------- 工具函数 ----------
     const $ = (s) => document.querySelector(s);
     const getDeviceId = () => {
       let id = localStorage.getItem('device_id');
@@ -78,7 +77,6 @@
     const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const todayStr = formatDate(new Date());
 
-    // ---------- IndexedDB 封装 ----------
     const dbPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open('writing-trainer', 1);
       request.onupgradeneeded = (e) => {
@@ -105,7 +103,6 @@
       });
     };
 
-    // ---------- 页面切换 ----------
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -116,7 +113,6 @@
       });
     });
 
-    // ---------- 每日话题 ----------
     let currentTopics = [];
     async function loadDailyTopics() {
       const cached = JSON.parse(localStorage.getItem('dailyTopicsCache') || '{}');
@@ -125,7 +121,6 @@
         return;
       }
       try {
-        // 获取RSS
         const rssRes = await fetch('/api/rss-news');
         const { rssContent } = await rssRes.json();
         const seed = parseInt(getDeviceId().replace(/-/g,'').slice(0,8), 16) + new Date(todayStr).getTime();
@@ -138,16 +133,27 @@
         if (data.topics?.length) {
           localStorage.setItem('dailyTopicsCache', JSON.stringify({ date: todayStr, topics: data.topics }));
           renderTopics(data.topics);
+        } else {
+          throw new Error('no topics');
         }
       } catch (e) {
         console.error(e);
+        const area = $('#daily-topics-area');
+        area.innerHTML = '<button id="manual-gen-btn" style="width:100%">生成今日话题</button>';
+        document.getElementById('manual-gen-btn').addEventListener('click', async () => {
+          document.getElementById('manual-gen-btn').textContent = '生成中...';
+          document.getElementById('manual-gen-btn').disabled = true;
+          localStorage.removeItem('dailyTopicsCache');
+          await loadDailyTopics();
+        });
       }
     }
+
     function renderTopics(topics) {
       currentTopics = topics;
       const area = $('#daily-topics-area');
       area.innerHTML = '';
-      topics.forEach((t, i) => {
+      topics.forEach((t) => {
         const card = document.createElement('div');
         card.className = 'topic-card';
         card.innerHTML = `<div class="title">${t}</div><button class="select-topic-btn">选这个写</button>`;
@@ -165,49 +171,51 @@
       area.appendChild(refreshBtn);
     }
 
-    // ---------- 写作编辑器 ----------
     function startWriting(topic) {
       $('#daily-topics-area').style.display = 'none';
       $('#daily-editor').style.display = 'block';
       $('#selected-topic').textContent = topic;
       $('#writing-area').value = '';
       updateWordCount();
-      // 编辑器缩进逻辑
       const textarea = $('#writing-area');
-      textarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const start = textarea.selectionStart;
-          const end = textarea.selectionEnd;
-          const val = textarea.value;
-          textarea.value = val.substring(0, start) + '\n\u3000\u3000' + val.substring(end);
-          textarea.selectionStart = textarea.selectionEnd = start + 3;
-          updateWordCount();
-        }
-      });
-      textarea.addEventListener('input', updateWordCount);
-      // 草稿恢复
+      if (!textarea.dataset.listenerAttached) {
+        textarea.dataset.listenerAttached = '1';
+        textarea.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const val = textarea.value;
+            textarea.value = val.substring(0, start) + '\n\u3000\u3000' + val.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + 3;
+            updateWordCount();
+          }
+        });
+        textarea.addEventListener('input', updateWordCount);
+      }
       const draftKey = `draft_${topic}_${todayStr}`;
       const draft = localStorage.getItem(draftKey);
       if (draft) textarea.value = draft;
+      updateWordCount();
     }
+
     function updateWordCount() {
       const len = $('#writing-area').value.length;
       $('#word-count').textContent = `共 ${len} 字`;
     }
+
     $('#save-draft-btn').addEventListener('click', () => {
       const topic = $('#selected-topic').textContent;
       const draftKey = `draft_${topic}_${todayStr}`;
       localStorage.setItem(draftKey, $('#writing-area').value);
       alert('草稿已保存');
     });
+
     $('#submit-btn').addEventListener('click', async () => {
       const topic = $('#selected-topic').textContent;
       let content = $('#writing-area').value;
-      // 统一段落缩进
       content = content.split('\n').map(line => line.trim() ? '\u3000\u3000' + line : line).join('\n');
       $('#writing-area').value = content;
-      // 提交评分
       try {
         const res = await fetch('/api/rate', {
           method: 'POST',
@@ -215,12 +223,9 @@
           body: JSON.stringify({ article: content, topic })
         });
         const data = await res.json();
-        // 存文章
         await saveArticle({ date: todayStr, topic, content, review: data.review || '', timestamp: Date.now() });
-        // 清除草稿
         const draftKey = `draft_${topic}_${todayStr}`;
         localStorage.removeItem(draftKey);
-        // 显示评语
         $('#daily-editor').style.display = 'none';
         $('#review-area').style.display = 'block';
         $('#review-text').textContent = data.review || '感谢你的分享，继续加油！';
@@ -228,16 +233,17 @@
         alert('提交失败，请检查网络');
       }
     });
+
     $('#copy-review-article').addEventListener('click', () => {
       navigator.clipboard.writeText($('#writing-area').value);
       alert('已复制全文');
     });
+
     $('#back-from-review').addEventListener('click', () => {
       $('#review-area').style.display = 'none';
       $('#daily-topics-area').style.display = 'block';
     });
 
-    // ---------- 随便写点 ----------
     let smallTopicCache = [];
     async function loadSmallTopic() {
       if (smallTopicCache.length === 0) {
@@ -249,7 +255,7 @@
           });
           const data = await res.json();
           if (data.topics?.length) smallTopicCache = data.topics;
-        } catch (e) {}
+        } catch (e) { console.error(e); }
       }
       if (smallTopicCache.length > 0) {
         const randomIndex = Math.floor(Math.random() * smallTopicCache.length);
@@ -258,26 +264,31 @@
         $('#small-topic-text').textContent = '写下今天最安静的时刻';
       }
     }
+
     $('#small-refresh-btn').addEventListener('click', loadSmallTopic);
     $('#small-start-btn').addEventListener('click', () => {
       const topic = $('#small-topic-text').textContent;
-      // 复用编辑器，但跳转到每日页并启动
       document.querySelector('.tab[data-page="daily"]').click();
       startWriting(topic);
     });
 
-    // ---------- 我的文章 ----------
     async function loadArticles() {
       const articles = await getAllArticles();
       const list = $('#articles-list');
       list.innerHTML = '';
+      if (articles.length === 0) {
+        list.innerHTML = '<p style="color:#999;text-align:center;margin-top:32px;">还没有写过文章，去写作吧~</p>';
+        return;
+      }
       articles.forEach(a => {
         const div = document.createElement('div');
         div.className = 'article-list-item';
         div.innerHTML = `<div class="date">${a.date}</div><div><b>${a.topic || '无题'}</b></div><div style="color:#666">${a.content.slice(0,50)}...</div>`;
         div.addEventListener('click', () => {
-          alert(`题目：${a.topic}\n\n${a.content}\n\n${a.review ? '评语：'+a.review : ''}`);
-          if (confirm('复制全文？')) navigator.clipboard.writeText(a.content);
+          if (confirm('查看全文并复制？')) {
+            navigator.clipboard.writeText(a.content);
+            alert(`题目：${a.topic}\n\n${a.content}\n\n${a.review ? '评语：'+a.review : ''}`);
+          }
         });
         list.appendChild(div);
       });
