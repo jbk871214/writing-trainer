@@ -19,13 +19,15 @@
     button:active { opacity: 0.8; }
     button:disabled { background: #ccc; cursor: not-allowed; }
     .topic-card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .topic-card .topic-label { font-size: 12px; color: #999; margin-bottom: 4px; }
     .topic-card .title { font-size: 16px; margin-bottom: 8px; white-space: pre-wrap; }
     .topic-card button { margin-top: 8px; width: 100%; }
-    textarea { width: 100%; height: 55vh; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; line-height: 1.6; resize: none; }
+    .editor-box { margin-bottom: 12px; }
+    .editor-box input[type="text"] { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; }
+    textarea { width: 100%; height: 50vh; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; line-height: 1.6; resize: none; }
     .word-count { text-align: right; color: #999; font-size: 12px; margin-top: 4px; }
-    .article-list-item, .draft-item { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+    .article-list-item, .draft-item { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 8px; position: relative; }
     .article-list-item .date, .draft-item .date { font-size: 12px; color: #999; }
-    .review-box { background: #f0f8ff; border-radius: 8px; padding: 12px; margin: 16px 0; }
     .sub-tabs { display: flex; margin: 12px 0; }
     .sub-tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; background: #eee; }
     .sub-tab.active { background: #333; color: #fff; }
@@ -35,6 +37,7 @@
     .regen-container { display: flex; align-items: center; margin-top: 8px; }
     .regen-container button { flex: 1; }
     .regen-container .regen-hint { flex: 1; text-align: right; }
+    .delete-btn { background: #a00; margin-left: 8px; }
   </style>
 </head>
 <body>
@@ -46,17 +49,15 @@
       <div id="daily-editor" style="display:none">
         <button class="back-btn" id="daily-back-btn">← 返回题目</button>
         <div id="selected-topic" style="font-weight:bold;margin-bottom:8px"></div>
+        <div class="editor-box">
+          <input type="text" id="daily-title-input" placeholder="请输入标题（如已自动填充可修改）">
+        </div>
         <textarea id="writing-area" placeholder="开始写..."></textarea>
         <div class="word-count" id="word-count">共 0 字</div>
         <div style="margin-top:12px;display:flex;gap:8px">
           <button id="save-draft-btn" style="flex:1;background:#666">保存草稿</button>
           <button id="submit-btn" style="flex:1">完成并提交</button>
         </div>
-      </div>
-      <div id="review-area" style="display:none">
-        <div class="review-box" id="review-text"></div>
-        <button id="copy-review-article">复制全文</button>
-        <button id="back-from-review" style="background:#999;margin-left:8px">返回</button>
       </div>
     </div>
 
@@ -70,17 +71,15 @@
       <div id="small-editor" style="display:none">
         <button class="back-btn" id="small-back-btn">← 返回</button>
         <div id="small-selected-topic" style="font-weight:bold;margin-bottom:8px"></div>
+        <div class="editor-box">
+          <input type="text" id="small-title-input" placeholder="请输入标题">
+        </div>
         <textarea id="small-writing-area" placeholder="开始写..."></textarea>
         <div class="word-count" id="small-word-count">共 0 字</div>
         <div style="margin-top:12px;display:flex;gap:8px">
           <button id="small-save-draft-btn" style="flex:1;background:#666">保存草稿</button>
           <button id="small-submit-btn" style="flex:1">完成并提交</button>
         </div>
-      </div>
-      <div id="small-review-area" style="display:none">
-        <div class="review-box" id="small-review-text"></div>
-        <button id="small-copy-review">复制全文</button>
-        <button id="small-back-review" style="background:#999;margin-left:8px">返回</button>
       </div>
     </div>
 
@@ -111,7 +110,6 @@
     const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const todayStr = formatDate(new Date());
 
-    // IndexedDB
     const dbPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open('writing-trainer', 2);
       request.onupgradeneeded = (e) => {
@@ -140,6 +138,12 @@
         const request = tx.objectStore('articles').getAll();
         request.onsuccess = () => resolve(request.result.reverse());
       });
+    };
+    const deleteArticleById = async (id) => {
+      const db = await dbPromise;
+      const tx = db.transaction('articles', 'readwrite');
+      tx.objectStore('articles').delete(id);
+      return tx.complete;
     };
 
     const saveDraft = async (draft) => {
@@ -191,26 +195,18 @@
       });
     });
 
-    // 历史题目去重
     const getHistoryTopics = () => {
-      try {
-        return JSON.parse(localStorage.getItem('historyTopics') || '[]');
-      } catch { return []; }
+      try { return JSON.parse(localStorage.getItem('historyTopics') || '[]'); } catch { return []; }
     };
     const addHistoryTopics = (newTopics) => {
       const history = getHistoryTopics();
-      newTopics.forEach(t => {
-        if (!history.includes(t)) history.push(t);
-      });
+      newTopics.forEach(t => { if (!history.includes(t)) history.push(t); });
       localStorage.setItem('historyTopics', JSON.stringify(history.slice(-50)));
     };
 
-    // 重新生成次数控制
     const getRegenInfo = () => {
       const date = localStorage.getItem('regenDate');
-      if (date !== todayStr) {
-        return { remaining: 3, total: 3 };
-      }
+      if (date !== todayStr) return { remaining: 3, total: 3 };
       const remaining = parseInt(localStorage.getItem('regenRemaining') || '3', 10);
       return { remaining, total: 3 };
     };
@@ -219,7 +215,7 @@
       localStorage.setItem('regenRemaining', val);
     };
 
-    // 今日写作：生成话题
+    // 生成今日题目
     async function genDailyTopics() {
       const regen = getRegenInfo();
       let isFirstGen = true;
@@ -234,10 +230,7 @@
       }
 
       const btn = document.getElementById('gen-daily-btn');
-      if (btn) {
-        btn.textContent = '生成中...';
-        btn.disabled = true;
-      }
+      if (btn) { btn.textContent = '生成中...'; btn.disabled = true; }
 
       try {
         const rssRes = await fetch('/api/rss-news');
@@ -251,15 +244,13 @@
         });
         const data = await res.json();
         if (data.topics?.length) {
+          // 确保至少三个
           while (data.topics.length < 3) data.topics.push('自由写作');
           const threeTopics = data.topics.slice(0, 3);
           addHistoryTopics(threeTopics);
           localStorage.setItem('dailyTopicsCache', JSON.stringify({ date: todayStr, topics: threeTopics }));
-          if (isFirstGen) {
-            setRegenRemaining(3);
-          } else {
-            setRegenRemaining(regen.remaining - 1);
-          }
+          if (isFirstGen) setRegenRemaining(3);
+          else setRegenRemaining(regen.remaining - 1);
           renderTopics(threeTopics);
         } else {
           throw new Error(data.error || '未知错误');
@@ -276,15 +267,16 @@
       const area = $('#daily-topics-area');
       area.innerHTML = '';
       const styleLabels = ['命题作文', '材料作文', '半命题作文'];
+      const types = ['proposition', 'material', 'half'];
       topics.forEach((t, i) => {
         const card = document.createElement('div');
         card.className = 'topic-card';
         card.innerHTML = `
-          <div style="font-size:12px;color:#999;margin-bottom:4px">${styleLabels[i] || '题目'}</div>
+          <div class="topic-label">${styleLabels[i] || '题目'}</div>
           <div class="title">${t}</div>
           <button class="select-topic-btn">选这个写</button>
         `;
-        card.querySelector('.select-topic-btn').addEventListener('click', () => startWriting(t));
+        card.querySelector('.select-topic-btn').addEventListener('click', () => startWriting(types[i] || 'proposition', t));
         area.appendChild(card);
       });
 
@@ -304,11 +296,19 @@
       area.appendChild(container);
     }
 
-    // 开始写作（今日写作）—— 异步函数，恢复草稿
-    async function startWriting(topic) {
+    // 开始写作（今日写作）
+    async function startWriting(type, topicText) {
       $('#daily-topics-area').style.display = 'none';
       $('#daily-editor').style.display = 'block';
-      $('#selected-topic').textContent = topic;
+      $('#selected-topic').textContent = topicText;
+      $('#daily-title-input').value = '';
+      if (type === 'proposition') {
+        $('#daily-title-input').value = topicText;
+      } else if (type === 'half') {
+        $('#daily-title-input').value = topicText; // 半截题目，用户可补全
+      } else {
+        // material 留空
+      }
       $('#writing-area').value = '';
       updateWordCount();
 
@@ -329,11 +329,12 @@
         textarea.addEventListener('input', updateWordCount);
       }
 
-      // 从 IndexedDB 查找草稿
+      // 恢复草稿
       const drafts = await getAllDrafts();
-      const matched = drafts.find(d => d.topic === topic && d.source === 'daily' && d.date === todayStr);
+      const matched = drafts.find(d => d.topic === topicText && d.source === 'daily' && d.date === todayStr);
       if (matched) {
         textarea.value = matched.content;
+        if (matched.title) $('#daily-title-input').value = matched.title;
         textarea.dataset.draftId = matched.id;
       } else {
         textarea.dataset.draftId = '';
@@ -345,7 +346,7 @@
       $('#word-count').textContent = `共 ${$('#writing-area').value.length} 字`;
     }
 
-    // 返回按钮：回到题目列表
+    // 返回题目列表
     $('#daily-back-btn').addEventListener('click', () => {
       $('#daily-editor').style.display = 'none';
       $('#daily-topics-area').style.display = 'block';
@@ -364,38 +365,33 @@
       }
     });
 
-    // 保存草稿（今日写作）—— 自动覆盖同日同题旧草稿
+    // 保存草稿（今日写作）
     $('#save-draft-btn').addEventListener('click', async () => {
       const topic = $('#selected-topic').textContent;
+      const title = $('#daily-title-input').value.trim() || topic;
       const content = $('#writing-area').value;
       if (!content.trim()) { alert('内容为空，无法保存草稿'); return; }
-      // 删除同日同题同来源的旧草稿
+      // 删除旧草稿
       const drafts = await getAllDrafts();
       for (const d of drafts) {
         if (d.topic === topic && d.source === 'daily' && d.date === todayStr) {
           await deleteDraftById(d.id);
         }
       }
-      await saveDraft({ date: todayStr, topic, content, source: 'daily', timestamp: Date.now() });
+      await saveDraft({ date: todayStr, topic, title, content, source: 'daily', timestamp: Date.now() });
       alert('草稿已保存');
     });
 
-    // 提交评分（今日写作）
+    // 提交文章（今日写作）—— 无评分，直接保存
     $('#submit-btn').addEventListener('click', async () => {
       const topic = $('#selected-topic').textContent;
+      const title = $('#daily-title-input').value.trim() || topic;
       let content = $('#writing-area').value;
       if (!content.trim()) { alert('内容为空'); return; }
       content = content.split('\n').map(line => line.trim() ? '\u3000\u3000' + line : line).join('\n');
       $('#writing-area').value = content;
       try {
-        const res = await fetch('/api/rate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ article: content, topic })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '评分失败');
-        await saveArticle({ date: todayStr, topic, content, review: data.review || '', timestamp: Date.now() });
+        await saveArticle({ date: todayStr, topic, title, content, timestamp: Date.now() });
         // 删除相关草稿
         const drafts = await getAllDrafts();
         for (const d of drafts) {
@@ -403,27 +399,17 @@
             await deleteDraftById(d.id);
           }
         }
+        alert('文章已保存');
+        // 返回题目列表
         $('#daily-editor').style.display = 'none';
-        $('#review-area').style.display = 'block';
-        $('#review-text').textContent = data.review || '感谢你的分享，继续加油！';
+        $('#daily-topics-area').style.display = 'block';
+        const cache = localStorage.getItem('dailyTopicsCache');
+        if (cache) {
+          const parsed = JSON.parse(cache);
+          if (parsed.date === todayStr && parsed.topics?.length) renderTopics(parsed.topics);
+        }
       } catch (e) {
         alert(`提交失败：${e.message}`);
-      }
-    });
-
-    $('#copy-review-article').addEventListener('click', () => {
-      navigator.clipboard.writeText($('#writing-area').value);
-      alert('已复制全文');
-    });
-    $('#back-from-review').addEventListener('click', () => {
-      $('#review-area').style.display = 'none';
-      $('#daily-topics-area').style.display = 'block';
-      const cache = localStorage.getItem('dailyTopicsCache');
-      if (cache) {
-        const parsed = JSON.parse(cache);
-        if (parsed.date === todayStr && parsed.topics?.length) {
-          renderTopics(parsed.topics);
-        }
       }
     });
 
@@ -454,12 +440,13 @@
       await loadSmallTopic();
     });
 
-    // 开始写（随便写点）—— 异步，恢复草稿
+    // 开始写（随便写点）—— 标题栏留空
     $('#small-start-btn').addEventListener('click', async () => {
       const topic = $('#small-topic-text').textContent;
       $('#small-topic-card').style.display = 'none';
       $('#small-editor').style.display = 'block';
       $('#small-selected-topic').textContent = topic;
+      $('#small-title-input').value = '';
       $('#small-writing-area').value = '';
       updateSmallWordCount();
 
@@ -480,11 +467,12 @@
         textarea.addEventListener('input', updateSmallWordCount);
       }
 
-      // 从 IndexedDB 查找草稿
+      // 恢复草稿
       const drafts = await getAllDrafts();
       const matched = drafts.find(d => d.topic === topic && d.source === 'small' && d.date === todayStr);
       if (matched) {
         textarea.value = matched.content;
+        if (matched.title) $('#small-title-input').value = matched.title;
         textarea.dataset.draftId = matched.id;
       } else {
         textarea.dataset.draftId = '';
@@ -501,82 +489,76 @@
       $('#small-topic-card').style.display = 'block';
     });
 
-    // 保存草稿（随便写点）—— 自动覆盖
     $('#small-save-draft-btn').addEventListener('click', async () => {
       const topic = $('#small-selected-topic').textContent;
+      const title = $('#small-title-input').value.trim() || topic;
       const content = $('#small-writing-area').value;
       if (!content.trim()) { alert('内容为空，无法保存草稿'); return; }
-      // 删除旧草稿
       const drafts = await getAllDrafts();
       for (const d of drafts) {
         if (d.topic === topic && d.source === 'small' && d.date === todayStr) {
           await deleteDraftById(d.id);
         }
       }
-      await saveDraft({ date: todayStr, topic, content, source: 'small', timestamp: Date.now() });
+      await saveDraft({ date: todayStr, topic, title, content, source: 'small', timestamp: Date.now() });
       alert('草稿已保存');
     });
 
-    // 提交评分（随便写点）
     $('#small-submit-btn').addEventListener('click', async () => {
       const topic = $('#small-selected-topic').textContent;
+      const title = $('#small-title-input').value.trim() || topic;
       let content = $('#small-writing-area').value;
       if (!content.trim()) { alert('内容为空'); return; }
       content = content.split('\n').map(line => line.trim() ? '\u3000\u3000' + line : line).join('\n');
       $('#small-writing-area').value = content;
       try {
-        const res = await fetch('/api/rate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ article: content, topic })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '评分失败');
-        await saveArticle({ date: todayStr, topic, content, review: data.review || '', timestamp: Date.now() });
-        // 删除相关草稿
+        await saveArticle({ date: todayStr, topic, title, content, timestamp: Date.now() });
         const drafts = await getAllDrafts();
         for (const d of drafts) {
           if (d.topic === topic && d.source === 'small' && d.date === todayStr) {
             await deleteDraftById(d.id);
           }
         }
+        alert('文章已保存');
         $('#small-editor').style.display = 'none';
-        $('#small-review-area').style.display = 'block';
-        $('#small-review-text').textContent = data.review || '感谢你的分享，继续加油！';
+        $('#small-topic-card').style.display = 'block';
       } catch (e) {
         alert(`提交失败：${e.message}`);
       }
     });
 
-    $('#small-copy-review').addEventListener('click', () => {
-      navigator.clipboard.writeText($('#small-writing-area').value);
-      alert('已复制全文');
-    });
-    $('#small-back-review').addEventListener('click', () => {
-      $('#small-review-area').style.display = 'none';
-      $('#small-topic-card').style.display = 'block';
-    });
-
     // ========== 我的文章（文章+草稿箱） ==========
     async function loadArticlesAndDrafts() {
-      // 已发布
       const articles = await getAllArticles();
       const publishedDiv = $('#published-list');
       publishedDiv.innerHTML = articles.length ? '' : '<p style="color:#999;text-align:center;margin-top:32px;">还没有发布文章</p>';
       articles.forEach(a => {
         const div = document.createElement('div');
         div.className = 'article-list-item';
-        div.innerHTML = `<div class="date">${a.date}</div><div><b>${a.topic || '无题'}</b></div><div style="color:#666">${a.content.slice(0,50)}...</div>`;
+        div.innerHTML = `
+          <div class="date">${a.date}</div>
+          <div><b>${a.title || a.topic || '无题'}</b></div>
+          <div style="color:#666">${a.content.slice(0,50)}...</div>
+          <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+            <button class="delete-article-btn" style="background:#a00;padding:6px 12px;font-size:14px;">删除</button>
+          </div>
+        `;
+        div.querySelector('.delete-article-btn').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm('确定删除这篇文章？')) {
+            await deleteArticleById(a.id);
+            loadArticlesAndDrafts();
+          }
+        });
         div.addEventListener('click', () => {
           if (confirm('查看全文并复制？')) {
             navigator.clipboard.writeText(a.content);
-            alert(`题目：${a.topic}\n\n${a.content}\n\n${a.review ? '评语：'+a.review : ''}`);
+            alert(`题目：${a.title || a.topic}\n\n${a.content}`);
           }
         });
         publishedDiv.appendChild(div);
       });
 
-      // 草稿
       const drafts = await getAllDrafts();
       const draftsDiv = $('#drafts-list');
       draftsDiv.innerHTML = drafts.length ? '' : '<p style="color:#999;text-align:center;margin-top:32px;">草稿箱为空</p>';
@@ -585,7 +567,7 @@
         div.className = 'draft-item';
         div.innerHTML = `
           <div class="date">${d.date} · ${d.source === 'daily' ? '今日写作' : '随便写点'}</div>
-          <div><b>${d.topic || '无题'}</b></div>
+          <div><b>${d.title || d.topic || '无题'}</b></div>
           <div style="color:#666">${d.content.slice(0,50)}...</div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="edit-draft-btn" style="flex:1;background:#555">继续编辑</button>
@@ -598,6 +580,7 @@
             $('#daily-topics-area').style.display = 'none';
             $('#daily-editor').style.display = 'block';
             $('#selected-topic').textContent = d.topic;
+            $('#daily-title-input').value = d.title || '';
             $('#writing-area').value = d.content;
             updateWordCount();
           } else {
@@ -605,6 +588,7 @@
             $('#small-topic-card').style.display = 'none';
             $('#small-editor').style.display = 'block';
             $('#small-selected-topic').textContent = d.topic;
+            $('#small-title-input').value = d.title || '';
             $('#small-writing-area').value = d.content;
             updateSmallWordCount();
           }
