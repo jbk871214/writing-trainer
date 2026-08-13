@@ -32,26 +32,20 @@ export async function onRequest(context) {
       throw new Error('Missing SILICONFLOW_KEY');
     }
 
-    let systemPrompt = '你是一个资深语文教师，擅长设计贴近中学生生活的作文题目，题目要求具体、有画面感、避免空泛宏大。';
+    let systemPrompt = '';
     let userPrompt = '';
 
     if (type === 'daily' && rssContent) {
-      systemPrompt += '你可以结合近期新闻，但题目仍要落脚于个人体验与日常观察。';
+      systemPrompt = '你是一个资深语文教师，擅长设计中学生日常写作训练题目。你只会严格按格式输出题目，绝不输出任何多余内容。';
       userPrompt = `以下是今日新闻摘要：\n${rssContent}\n\n请根据以上素材，设计三个作文题目，要求：
-1. 第一个为命题作文式：直接给出具体题目，如《那一刻，我长大了》《窗外的风景》，不超过15字。
-2. 第二个为材料作文式：给出一段简短材料或情境描述（不超过40字），然后要求围绕材料自拟题目写作。
-3. 第三个为半命题式：题目留空，如《____的力量》《原来，____》，要求补全后写作。
-4. 三个题目风格贴近中学生的日常生活和成长感悟，避免政治、宏大叙事。
-5. 输出格式：每行一个题目，不写编号，不写类型标签，第一个是命题，第二个是材料（材料后面用“//”分隔题目要求），第三个是半命题（直接写题目，留空用“____”表示）。
-${excludeTopics && excludeTopics.length ? `6. 避免与以下题目重复：${excludeTopics.join('、')}` : ''}`;
+1. 第一行：命题作文，只写题目，不加任何前缀或引号，如《那一刻，我长大了》。
+2. 第二行：材料作文，格式为“材料：<简短情境或故事> 要求：请结合材料，自拟题目，写一篇短文，可叙事、可议论、可抒情。”
+3. 第三行：半命题作文，只写带有“____”的半截题目，如“____的力量”。
+不要输出任何解释、问候、编号或其他内容。
+${excludeTopics && excludeTopics.length ? `避免与以下题目重复：${excludeTopics.join('、')}` : ''}`;
     } else if (type === 'small-things') {
-      systemPrompt = '你是一个创意写作引导师，专门提供生活观察类的微型写作灵感。';
-      userPrompt = `请为我生成1个“生活中的小事”写作题目，要求：
-1. 类似《642件可写的事》风格
-2. 简短有趣，能启发观察和记录
-3. 不超过15个字
-4. 只输出题目本身，不要任何解释
-${excludeTopics && excludeTopics.length ? `5. 避免与以下题目重复：${excludeTopics.join('、')}` : ''}`;
+      systemPrompt = '你是一个创意写作引导师，只输出一个生活中的小事题目，不超过15字，不带任何解释。';
+      userPrompt = `${excludeTopics && excludeTopics.length ? `避免与以下题目重复：${excludeTopics.join('、')}` : ''}`;
     } else {
       return new Response(JSON.stringify({ error: 'Invalid type' }), {
         status: 400,
@@ -71,7 +65,7 @@ ${excludeTopics && excludeTopics.length ? `5. 避免与以下题目重复：${ex
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.9,
+        temperature: 0.7,
         max_tokens: 300,
         seed,
       }),
@@ -103,9 +97,13 @@ ${excludeTopics && excludeTopics.length ? `5. 避免与以下题目重复：${ex
       });
     }
 
-    let topics = content.split('\n').filter(t => t.trim().length > 0);
-    topics = topics.map(t => t.trim());
-    if (topics.length === 0) topics = [content];
+    let topics = content.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+
+    // 对于 daily 类型，需要三个题目；如果不是三个，尝试重试一次（这里不实现重试，直接返回现有内容）
+    if (type === 'daily' && topics.length < 3) {
+      // 如果不足三个，补占位
+      while (topics.length < 3) topics.push('自由写作');
+    }
 
     return new Response(JSON.stringify({ topics }), {
       status: 200,
