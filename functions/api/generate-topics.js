@@ -36,12 +36,12 @@ export async function onRequest(context) {
     let userPrompt = '';
 
     if (type === 'daily' && rssContent) {
-      systemPrompt = '你是一个资深语文教师，擅长设计中学生日常写作训练题目。你只会严格按格式输出题目，绝不输出任何多余内容。';
+      systemPrompt = '你是一个资深语文教师，擅长设计中学生写作训练题目。你只会严格按照指定格式输出，绝不输出任何多余内容。';
       userPrompt = `以下是今日新闻摘要：\n${rssContent}\n\n请根据以上素材，设计三个作文题目，要求：
-1. 第一行：命题作文，只写题目，不加任何前缀或引号，如《那一刻，我长大了》。
-2. 第二行：材料作文，格式为“材料：<简短情境或故事> 要求：请结合材料，自拟题目，写一篇短文，可叙事、可议论、可抒情。”
-3. 第三行：半命题作文，只写带有“____”的半截题目，如“____的力量”。
-不要输出任何解释、问候、编号或其他内容。
+1. 第一个是命题作文：直接写题目，如《那一刻，我长大了》，不要加任何前缀。
+2. 第二个是材料作文：先写“材料：”后面接一段简短情境或故事（不超过40字），然后换行写“要求：请结合材料，自拟题目，写一篇短文，可叙事、可议论、可抒情。”
+3. 第三个是半命题作文：只写带有“____”的半截题目，如“____的力量”。
+三个题目之间必须用三个竖线“|||”分隔。不要输出任何其他解释、问候或编号。
 ${excludeTopics && excludeTopics.length ? `避免与以下题目重复：${excludeTopics.join('、')}` : ''}`;
     } else if (type === 'small-things') {
       systemPrompt = '你是一个创意写作引导师，只输出一个生活中的小事题目，不超过15字，不带任何解释。';
@@ -66,7 +66,7 @@ ${excludeTopics && excludeTopics.length ? `避免与以下题目重复：${exclu
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 300,
+        max_tokens: 400,
         seed,
       }),
     });
@@ -97,12 +97,17 @@ ${excludeTopics && excludeTopics.length ? `避免与以下题目重复：${exclu
       });
     }
 
-    let topics = content.split('\n').map(t => t.trim()).filter(t => t.length > 0);
-
-    // 对于 daily 类型，需要三个题目；如果不是三个，尝试重试一次（这里不实现重试，直接返回现有内容）
-    if (type === 'daily' && topics.length < 3) {
-      // 如果不足三个，补占位
+    let topics;
+    if (type === 'daily') {
+      // 按 ||| 分隔
+      topics = content.split('|||').map(t => t.trim()).filter(t => t.length > 0);
+      // 清理行首可能的数字编号
+      topics = topics.map(t => t.replace(/^\d+[\.\)]\s*/, '').trim());
+      // 确保有三个
       while (topics.length < 3) topics.push('自由写作');
+      topics = topics.slice(0, 3);
+    } else {
+      topics = [content.trim().replace(/^\d+[\.\)]\s*/, '')];
     }
 
     return new Response(JSON.stringify({ topics }), {

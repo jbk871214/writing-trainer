@@ -20,11 +20,12 @@
     button:disabled { background: #ccc; cursor: not-allowed; }
     .topic-card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
     .topic-card .topic-label { font-size: 12px; color: #999; margin-bottom: 4px; }
-    .topic-card .title { font-size: 16px; margin-bottom: 8px; white-space: pre-wrap; }
+    .topic-card .title { font-size: 16px; margin-bottom: 8px; white-space: pre-wrap; line-height: 1.5; }
     .topic-card button { margin-top: 8px; width: 100%; }
     .editor-box { margin-bottom: 12px; }
     .editor-box input[type="text"] { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; }
-    textarea { width: 100%; height: 50vh; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; line-height: 1.6; resize: none; }
+    .reference-box { background: #f5f5f5; border-radius: 8px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; line-height: 1.6; }
+    textarea { width: 100%; height: 45vh; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; line-height: 1.6; resize: none; }
     .word-count { text-align: right; color: #999; font-size: 12px; margin-top: 4px; }
     .article-list-item, .draft-item { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 8px; position: relative; }
     .article-list-item .date, .draft-item .date { font-size: 12px; color: #999; }
@@ -37,7 +38,6 @@
     .regen-container { display: flex; align-items: center; margin-top: 8px; }
     .regen-container button { flex: 1; }
     .regen-container .regen-hint { flex: 1; text-align: right; }
-    .delete-btn { background: #a00; margin-left: 8px; }
   </style>
 </head>
 <body>
@@ -48,10 +48,11 @@
       <div id="daily-topics-area"></div>
       <div id="daily-editor" style="display:none">
         <button class="back-btn" id="daily-back-btn">← 返回题目</button>
-        <div id="selected-topic" style="font-weight:bold;margin-bottom:8px"></div>
+        <div id="selected-topic" style="font-weight:bold;margin-bottom:8px;white-space:pre-wrap;"></div>
         <div class="editor-box">
           <input type="text" id="daily-title-input" placeholder="请输入标题（如已自动填充可修改）">
         </div>
+        <div id="daily-reference" class="reference-box" style="display:none;"></div>
         <textarea id="writing-area" placeholder="开始写..."></textarea>
         <div class="word-count" id="word-count">共 0 字</div>
         <div style="margin-top:12px;display:flex;gap:8px">
@@ -167,7 +168,6 @@
       return tx.complete;
     };
 
-    // 页面切换
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -178,7 +178,6 @@
       });
     });
 
-    // 二级 Tab 切换
     document.querySelectorAll('.sub-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
@@ -244,7 +243,6 @@
         });
         const data = await res.json();
         if (data.topics?.length) {
-          // 确保至少三个
           while (data.topics.length < 3) data.topics.push('自由写作');
           const threeTopics = data.topics.slice(0, 3);
           addHistoryTopics(threeTopics);
@@ -302,13 +300,20 @@
       $('#daily-editor').style.display = 'block';
       $('#selected-topic').textContent = topicText;
       $('#daily-title-input').value = '';
+      $('#daily-reference').style.display = 'none';
+      $('#daily-reference').textContent = '';
+
       if (type === 'proposition') {
         $('#daily-title-input').value = topicText;
       } else if (type === 'half') {
-        $('#daily-title-input').value = topicText; // 半截题目，用户可补全
-      } else {
-        // material 留空
+        $('#daily-title-input').value = topicText; // 半截题目，用户补全
+      } else if (type === 'material') {
+        // 材料作文：标题留空，参考区显示材料和完整要求
+        $('#daily-title-input').value = '';
+        $('#daily-reference').textContent = topicText;
+        $('#daily-reference').style.display = 'block';
       }
+
       $('#writing-area').value = '';
       updateWordCount();
 
@@ -371,7 +376,6 @@
       const title = $('#daily-title-input').value.trim() || topic;
       const content = $('#writing-area').value;
       if (!content.trim()) { alert('内容为空，无法保存草稿'); return; }
-      // 删除旧草稿
       const drafts = await getAllDrafts();
       for (const d of drafts) {
         if (d.topic === topic && d.source === 'daily' && d.date === todayStr) {
@@ -382,7 +386,7 @@
       alert('草稿已保存');
     });
 
-    // 提交文章（今日写作）—— 无评分，直接保存
+    // 提交文章（今日写作）—— 无评分
     $('#submit-btn').addEventListener('click', async () => {
       const topic = $('#selected-topic').textContent;
       const title = $('#daily-title-input').value.trim() || topic;
@@ -392,7 +396,6 @@
       $('#writing-area').value = content;
       try {
         await saveArticle({ date: todayStr, topic, title, content, timestamp: Date.now() });
-        // 删除相关草稿
         const drafts = await getAllDrafts();
         for (const d of drafts) {
           if (d.topic === topic && d.source === 'daily' && d.date === todayStr) {
@@ -400,7 +403,6 @@
           }
         }
         alert('文章已保存');
-        // 返回题目列表
         $('#daily-editor').style.display = 'none';
         $('#daily-topics-area').style.display = 'block';
         const cache = localStorage.getItem('dailyTopicsCache');
@@ -440,7 +442,7 @@
       await loadSmallTopic();
     });
 
-    // 开始写（随便写点）—— 标题栏留空
+    // 开始写（随便写点）
     $('#small-start-btn').addEventListener('click', async () => {
       const topic = $('#small-topic-text').textContent;
       $('#small-topic-card').style.display = 'none';
@@ -467,7 +469,6 @@
         textarea.addEventListener('input', updateSmallWordCount);
       }
 
-      // 恢复草稿
       const drafts = await getAllDrafts();
       const matched = drafts.find(d => d.topic === topic && d.source === 'small' && d.date === todayStr);
       if (matched) {
@@ -581,6 +582,7 @@
             $('#daily-editor').style.display = 'block';
             $('#selected-topic').textContent = d.topic;
             $('#daily-title-input').value = d.title || '';
+            $('#daily-reference').style.display = 'none';
             $('#writing-area').value = d.content;
             updateWordCount();
           } else {
